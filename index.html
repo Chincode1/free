@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>กล้องจับท่ามือ</title>
+<title>วาดรูปด้วยมือ</title>
 <style>
 html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,'Prompt',sans-serif;color:#f2f0ff}
 canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
@@ -11,12 +11,15 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .ov.hide{display:none}
 button{font:inherit;font-weight:600;border:0;border-radius:999px;padding:12px 28px;color:#fff;background:linear-gradient(135deg,#7c5cff,#ff5c93)}
 button:disabled{opacity:.6}
+#clr{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);padding:10px 26px;background:rgba(20,18,42,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:none}
 p{margin:0;color:#d8d4ff;line-height:1.6}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
+<button id="clr">ล้าง</button>
 <div class="ov" id="ov">
+  <p>ชูนิ้วชี้เพื่อวาด · กำมือ/เปิดมือเพื่อหยุดวาด</p>
   <button id="go">เปิดกล้อง</button>
   <p id="msg" style="font-size:.85rem"></p>
 </div>
@@ -25,58 +28,66 @@ p{margin:0;color:#d8d4ff;line-height:1.6}
 const $=id=>document.getElementById(id),cv=$('c'),ctx=cv.getContext('2d');
 const video=document.createElement('video');
 video.playsInline=true;video.setAttribute('playsinline','');video.muted=true;
-let lm=null,hearts=[],running=false;
+let lm=null,running=false;
 const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 
+// ชั้นวาดรูป (เก็บเส้นที่วาดไว้)
+let layer=document.createElement('canvas'),lctx=layer.getContext('2d');
 function resize(){
-  const r=window.devicePixelRatio||1;
-  cv.width=Math.round(innerWidth*r);cv.height=Math.round(innerHeight*r);
+  const r=window.devicePixelRatio||1,w=Math.round(innerWidth*r),h=Math.round(innerHeight*r);
+  const old=document.createElement('canvas');old.width=layer.width;old.height=layer.height;
+  if(layer.width&&layer.height)old.getContext('2d').drawImage(layer,0,0);
+  cv.width=w;cv.height=h;layer.width=w;layer.height=h;
+  if(old.width&&old.height)lctx.drawImage(old,0,0,w,h);
 }
 addEventListener('resize',resize);resize();
 
-function fingers(p){
+// ชี้นิ้วชี้อย่างเดียว = วาด
+function pointing(p){
   const ext=(t,pip)=>d(p[t],p[0])>d(p[pip],p[0])*1.15;
-  return{
-    thumb:d(p[4],p[17])>d(p[3],p[17])*1.1&&d(p[4],p[5])>d(p[3],p[5]),
-    index:ext(8,6),middle:ext(12,10),ring:ext(16,14),pinky:ext(20,18)
-  };
-}
-function gesture(p){
-  const f=fingers(p);
-  if(f.middle&&!f.index&&!f.ring&&!f.pinky)return'middle';
-  if(f.thumb&&f.index&&f.pinky&&!f.middle&&!f.ring)return'iloveyou';
-  return null;
+  return ext(8,6)&&!ext(12,10)&&!ext(16,14)&&!ext(20,18);
 }
 
+let sx=0,sy=0,pen=false,onFrames=0,offFrames=0;
 function loop(){
-  const W=cv.width,H=cv.height,vw=video.videoWidth||640,vh=video.videoHeight||480;
-  // เต็มจอแบบ cover: ขยายให้เต็มโดยไม่บิดสัดส่วน ส่วนเกินถูกตัดออก
+  const W=cv.width,H=cv.height,u=window.devicePixelRatio||1;
+  const vw=video.videoWidth||640,vh=video.videoHeight||480;
   const s=Math.max(W/vw,H/vh),dw=vw*s,dh=vh*s,dx=(W-dw)/2,dy=(H-dh)/2;
   ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
   ctx.save();ctx.translate(W,0);ctx.scale(-1,1);ctx.drawImage(video,dx,dy,dw,dh);ctx.restore();
 
+  let tip=null;
   if(lm&&video.readyState>=2){
     try{
       const res=lm.detectForVideo(video,performance.now());
-      for(const p of res.landmarks){
-        const g=gesture(p);
-        if(g){
-          const cx=W-(dx+p[9].x*dw),cy=dy+p[9].y*dh;
-          const handLen=Math.hypot((p[0].x-p[9].x)*dw,(p[0].y-p[9].y)*dh);
-          const size=Math.max(60,handLen*2.2);
-          ctx.font=size+'px serif';ctx.textAlign='center';ctx.textBaseline='middle';
-          ctx.fillText(g==='middle'?'❤️':'😡',cx,cy-size*.9);
-          if(g==='middle'&&Math.random()<.25)hearts.push({x:cx+(Math.random()-.5)*size,y:cy-size,t:0});
-        }
-      }
+      const p=res.landmarks[0];
+      if(p&&pointing(p))tip={x:W-(dx+p[8].x*dw),y:dy+p[8].y*dh};
     }catch(e){}
   }
-  const u=window.devicePixelRatio||1;
-  ctx.textAlign='center';ctx.textBaseline='middle';
-  hearts.forEach(h=>{h.t+=.016;ctx.globalAlpha=Math.max(0,1-h.t);ctx.font=(28*u)+'px serif';ctx.fillText('💖',h.x,h.y-h.t*120*u)});
-  ctx.globalAlpha=1;hearts=hearts.filter(h=>h.t<1);
+
+  if(tip){
+    offFrames=0;onFrames++;
+    if(onFrames>=2){
+      if(!pen){sx=tip.x;sy=tip.y;pen=true;}
+      else{
+        const nx=sx+(tip.x-sx)*.55,ny=sy+(tip.y-sy)*.55;
+        lctx.strokeStyle='#ff5c93';lctx.lineWidth=6*u;lctx.lineCap='round';lctx.lineJoin='round';
+        lctx.shadowColor='rgba(255,92,147,.7)';lctx.shadowBlur=10*u;
+        lctx.beginPath();lctx.moveTo(sx,sy);lctx.lineTo(nx,ny);lctx.stroke();
+        sx=nx;sy=ny;
+      }
+    }
+  }else{
+    onFrames=0;
+    if(++offFrames>=3)pen=false;
+  }
+
+  ctx.drawImage(layer,0,0);
+  if(tip){ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=2*u;ctx.beginPath();ctx.arc(tip.x,tip.y,8*u,0,7);ctx.stroke();}
   requestAnimationFrame(loop);
 }
+
+$('clr').onclick=()=>lctx.clearRect(0,0,layer.width,layer.height);
 
 function camError(e){
   if(!window.isSecureContext)return'ต้องเปิดผ่าน https:// (หรือ localhost) กล้องถึงจะทำงาน';
@@ -113,9 +124,9 @@ async function loadModel(){
   const fs=await FilesetResolver.forVisionTasks(base+"/wasm");
   const modelAssetPath="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
   try{
-    return await HandLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath,delegate:"GPU"},runningMode:"VIDEO",numHands:2});
+    return await HandLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath,delegate:"GPU"},runningMode:"VIDEO",numHands:1});
   }catch(e){
-    return await HandLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath,delegate:"CPU"},runningMode:"VIDEO",numHands:2});
+    return await HandLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath,delegate:"CPU"},runningMode:"VIDEO",numHands:1});
   }
 }
 
@@ -126,15 +137,14 @@ $('go').onclick=async()=>{
   }catch(e){
     $('msg').textContent=camError(e);$('go').disabled=false;return;
   }
-  $('ov').classList.add('hide');
+  $('ov').classList.add('hide');$('clr').style.display='block';
   if(!running){running=true;loop();}
   try{
     lm=await loadModel();
   }catch(e){
-    // โมเดลโหลดไม่ได้: โชว์ข้อความแจ้งเตือนสั้น ๆ
     $('msg').textContent='โหลดโมเดลจับมือไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต แล้วรีเฟรชหน้านี้';
-    $('go').style.display='none';$('ov').classList.remove('hide');
-    $('ov').style.background='transparent';$('ov').style.justifyContent='flex-end';
+    document.querySelector('#ov p').style.display='none';$('go').style.display='none';
+    $('ov').classList.remove('hide');$('ov').style.background='transparent';$('ov').style.justifyContent='flex-end';
   }
 };
 </script>
