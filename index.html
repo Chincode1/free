@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>กล้องจับท่ามือ</title>
+<style>
+body{margin:0;background:#14122a;color:#f2f0ff;font-family:system-ui,'Prompt',sans-serif;display:flex;justify-content:center;padding:16px}
+.app{width:100%;max-width:680px;text-align:center}
+h1{font-size:1.3rem;margin:4px 0 12px}
+.stage{position:relative;border-radius:20px;overflow:hidden;background:#000;aspect-ratio:4/3}
+canvas{width:100%;height:100%;display:block}
+.ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(20,18,42,.8);padding:20px}
+.ov.hide{display:none}
+button{font:inherit;font-weight:600;border:0;border-radius:999px;padding:12px 28px;color:#fff;background:linear-gradient(135deg,#7c5cff,#ff5c93)}
+p{margin:0;color:#d8d4ff;line-height:1.6}
+#st{margin-top:10px;font-size:1.1rem;min-height:1.6em}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>✋ กล้องจับท่ามือ</h1>
+  <div class="stage">
+    <canvas id="c" width="640" height="480"></canvas>
+    <div class="ov" id="ov">
+      <p>🖕 ชูนิ้วกลาง → ❤️ หัวใจ<br>🤟 ท่า I love you → 😡 โกรธ</p>
+      <button id="go">เปิดกล้อง</button>
+      <p id="msg" style="font-size:.85rem"></p>
+    </div>
+  </div>
+  <div id="st"></div>
+</div>
+<script type="module">
+import {HandLandmarker,FilesetResolver} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+const $=id=>document.getElementById(id),cv=$('c'),ctx=cv.getContext('2d');
+const video=document.createElement('video');video.playsInline=true;video.muted=true;
+let lm,hearts=[];
+const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+
+function fingers(p){
+  const ext=(t,pip)=>d(p[t],p[0])>d(p[pip],p[0])*1.15;
+  return{
+    thumb:d(p[4],p[17])>d(p[3],p[17])*1.1&&d(p[4],p[5])>d(p[3],p[5]),
+    index:ext(8,6),middle:ext(12,10),ring:ext(16,14),pinky:ext(20,18)
+  };
+}
+function gesture(p){
+  const f=fingers(p);
+  if(f.middle&&!f.index&&!f.ring&&!f.pinky)return'middle';
+  if(f.thumb&&f.index&&f.pinky&&!f.middle&&!f.ring)return'iloveyou';
+  return null;
+}
+function loop(){
+  const W=cv.width,H=cv.height;
+  ctx.save();ctx.translate(W,0);ctx.scale(-1,1);ctx.drawImage(video,0,0,W,H);ctx.restore();
+  let status='';
+  if(lm&&video.readyState>=2){
+    const res=lm.detectForVideo(video,performance.now());
+    for(const p of res.landmarks){
+      ctx.fillStyle='rgba(124,255,200,.9)';
+      p.forEach(q=>{ctx.beginPath();ctx.arc((1-q.x)*W,q.y*H,3,0,7);ctx.fill()});
+      const g=gesture(p);
+      if(g){
+        const cx=(1-p[9].x)*W,cy=p[9].y*H,size=Math.max(60,d(p[0],p[9])*H*2.2);
+        ctx.font=size+'px serif';ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillText(g==='middle'?'❤️':'😡',cx,cy-size*.9);
+        status=g==='middle'?'🖕 เจอนิ้วกลาง → ❤️':'🤟 เจอท่า I love you → 😡';
+        if(g==='middle'&&Math.random()<.25)hearts.push({x:cx+(Math.random()-.5)*80,y:cy-size,t:0});
+      }
+    }
+  }
+  hearts.forEach(h=>{h.t+=.016;ctx.globalAlpha=Math.max(0,1-h.t);ctx.font='28px serif';ctx.fillText('💖',h.x,h.y-h.t*120)});
+  ctx.globalAlpha=1;hearts=hearts.filter(h=>h.t<1);
+  $('st').textContent=status;
+  requestAnimationFrame(loop);
+}
+$('go').onclick=async()=>{
+  $('go').disabled=true;$('msg').textContent='กำลังโหลด...';
+  try{
+    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:640,height:480},audio:false});
+    video.srcObject=s;await video.play();
+    const fs=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    lm=await HandLandmarker.createFromOptions(fs,{
+      baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"},
+      runningMode:"VIDEO",numHands:2
+    });
+    $('ov').classList.add('hide');loop();
+  }catch(e){
+    $('msg').textContent='เกิดข้อผิดพลาด: '+(e.message||e.name);$('go').disabled=false;
+  }
+};
+</script>
+</body>
+</html>
