@@ -5,31 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>กล้องจับท่ามือ</title>
 <style>
-body{margin:0;background:#14122a;color:#f2f0ff;font-family:system-ui,'Prompt',sans-serif;display:flex;justify-content:center;padding:16px}
-.app{width:100%;max-width:680px;text-align:center}
-h1{font-size:1.3rem;margin:4px 0 12px}
-.stage{position:relative;border-radius:20px;overflow:hidden;background:#000;aspect-ratio:4/3}
-canvas{width:100%;height:100%;display:block}
-.ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(20,18,42,.8);padding:20px}
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,'Prompt',sans-serif;color:#f2f0ff}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+.ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(20,18,42,.85);padding:20px;text-align:center}
 .ov.hide{display:none}
 button{font:inherit;font-weight:600;border:0;border-radius:999px;padding:12px 28px;color:#fff;background:linear-gradient(135deg,#7c5cff,#ff5c93)}
 button:disabled{opacity:.6}
 p{margin:0;color:#d8d4ff;line-height:1.6}
-#st{margin-top:10px;font-size:1.1rem;min-height:1.6em}
 </style>
 </head>
 <body>
-<div class="app">
-  <h1>กล้องจับท่ามือ</h1>
-  <div class="stage">
-    <canvas id="c" width="640" height="480"></canvas>
-    <div class="ov" id="ov">
-      <p>กดปุ่มแล้วอนุญาตการใช้กล้อง</p>
-      <button id="go">เปิดกล้อง</button>
-      <p id="msg" style="font-size:.85rem"></p>
-    </div>
-  </div>
-  <div id="st"></div>
+<canvas id="c"></canvas>
+<div class="ov" id="ov">
+  <button id="go">เปิดกล้อง</button>
+  <p id="msg" style="font-size:.85rem"></p>
 </div>
 
 <script>
@@ -38,6 +27,12 @@ const video=document.createElement('video');
 video.playsInline=true;video.setAttribute('playsinline','');video.muted=true;
 let lm=null,hearts=[],running=false;
 const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+
+function resize(){
+  const r=window.devicePixelRatio||1;
+  cv.width=Math.round(innerWidth*r);cv.height=Math.round(innerHeight*r);
+}
+addEventListener('resize',resize);resize();
 
 function fingers(p){
   const ext=(t,pip)=>d(p[t],p[0])>d(p[pip],p[0])*1.15;
@@ -54,43 +49,45 @@ function gesture(p){
 }
 
 function loop(){
-  const W=cv.width,H=cv.height;
-  ctx.save();ctx.translate(W,0);ctx.scale(-1,1);ctx.drawImage(video,0,0,W,H);ctx.restore();
-  let status=lm?'':'กำลังโหลดโมเดลตรวจจับมือ...';
+  const W=cv.width,H=cv.height,vw=video.videoWidth||640,vh=video.videoHeight||480;
+  // เต็มจอแบบ cover: ขยายให้เต็มโดยไม่บิดสัดส่วน ส่วนเกินถูกตัดออก
+  const s=Math.max(W/vw,H/vh),dw=vw*s,dh=vh*s,dx=(W-dw)/2,dy=(H-dh)/2;
+  ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+  ctx.save();ctx.translate(W,0);ctx.scale(-1,1);ctx.drawImage(video,dx,dy,dw,dh);ctx.restore();
+
   if(lm&&video.readyState>=2){
     try{
       const res=lm.detectForVideo(video,performance.now());
       for(const p of res.landmarks){
-        ctx.fillStyle='rgba(124,255,200,.9)';
-        p.forEach(q=>{ctx.beginPath();ctx.arc((1-q.x)*W,q.y*H,3,0,7);ctx.fill()});
         const g=gesture(p);
         if(g){
-          const cx=(1-p[9].x)*W,cy=p[9].y*H,size=Math.max(60,d(p[0],p[9])*H*2.2);
+          const cx=W-(dx+p[9].x*dw),cy=dy+p[9].y*dh;
+          const handLen=Math.hypot((p[0].x-p[9].x)*dw,(p[0].y-p[9].y)*dh);
+          const size=Math.max(60,handLen*2.2);
           ctx.font=size+'px serif';ctx.textAlign='center';ctx.textBaseline='middle';
           ctx.fillText(g==='middle'?'❤️':'😡',cx,cy-size*.9);
-          status=g==='middle'?'🖕 เจอนิ้วกลาง → ❤️':'🤟 เจอท่า I love you → 😡';
-          if(g==='middle'&&Math.random()<.25)hearts.push({x:cx+(Math.random()-.5)*80,y:cy-size,t:0});
+          if(g==='middle'&&Math.random()<.25)hearts.push({x:cx+(Math.random()-.5)*size,y:cy-size,t:0});
         }
       }
-    }catch(e){/* ข้ามเฟรมที่ตรวจจับพลาด */}
+    }catch(e){}
   }
+  const u=window.devicePixelRatio||1;
   ctx.textAlign='center';ctx.textBaseline='middle';
-  hearts.forEach(h=>{h.t+=.016;ctx.globalAlpha=Math.max(0,1-h.t);ctx.font='28px serif';ctx.fillText('💖',h.x,h.y-h.t*120)});
+  hearts.forEach(h=>{h.t+=.016;ctx.globalAlpha=Math.max(0,1-h.t);ctx.font=(28*u)+'px serif';ctx.fillText('💖',h.x,h.y-h.t*120*u)});
   ctx.globalAlpha=1;hearts=hearts.filter(h=>h.t<1);
-  $('st').textContent=status;
   requestAnimationFrame(loop);
 }
 
 function camError(e){
   if(!window.isSecureContext)return'ต้องเปิดผ่าน https:// (หรือ localhost) กล้องถึงจะทำงาน';
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return'เบราว์เซอร์นี้ไม่รองรับกล้อง ลองเปิดใน Chrome หรือ Safari (ไม่ใช่ในแอป LINE/Facebook)';
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return'เบราว์เซอร์นี้ไม่รองรับกล้อง ลองเปิดใน Chrome หรือ Safari';
   switch(e&&e.name){
     case'NotAllowedError':case'SecurityError':
       return'ไม่ได้รับอนุญาตใช้กล้อง — กดแม่กุญแจข้าง URL แล้วเลือก "อนุญาต" (ถ้าอยู่ใน CodePen/iframe ให้เปิดเป็นหน้าเต็ม)';
     case'NotFoundError':case'OverconstrainedError':
       return'ไม่พบกล้องในอุปกรณ์นี้';
     case'NotReadableError':case'AbortError':
-      return'กล้องถูกใช้งานโดยแอปอื่นอยู่ ลองปิดแอปอื่นที่ใช้กล้องแล้วลองใหม่';
+      return'กล้องถูกใช้งานโดยแอปอื่นอยู่ ลองปิดแอปอื่นแล้วลองใหม่';
     default:
       return'เปิดกล้องไม่สำเร็จ: '+((e&&(e.message||e.name))||e);
   }
@@ -100,10 +97,10 @@ async function startCamera(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('no-mediadevices');
   let s;
   try{
-    s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});
+    s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}},audio:false});
   }catch(e){
     if(e&&(e.name==='OverconstrainedError'||e.name==='NotFoundError'))
-      s=await navigator.mediaDevices.getUserMedia({video:true,audio:false}); // ลองแบบไม่กำหนดเงื่อนไข
+      s=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
     else throw e;
   }
   video.srcObject=s;
@@ -124,7 +121,6 @@ async function loadModel(){
 
 $('go').onclick=async()=>{
   $('go').disabled=true;$('msg').textContent='กำลังเปิดกล้อง...';
-  // ขั้นที่ 1: เปิดกล้อง (แยกจากการโหลดโมเดล เพื่อให้เห็นภาพกล้องก่อนเสมอ)
   try{
     await startCamera();
   }catch(e){
@@ -132,11 +128,13 @@ $('go').onclick=async()=>{
   }
   $('ov').classList.add('hide');
   if(!running){running=true;loop();}
-  // ขั้นที่ 2: โหลดโมเดลจับมือ (ถ้าพังกล้องก็ยังเปิดอยู่)
   try{
     lm=await loadModel();
   }catch(e){
-    $('st').textContent='เปิดกล้องได้แล้ว แต่โหลดโมเดลจับมือไม่สำเร็จ (ตรวจสอบอินเทอร์เน็ต / ไฟร์วอลล์ที่บล็อก cdn.jsdelivr.net และ storage.googleapis.com)';
+    // โมเดลโหลดไม่ได้: โชว์ข้อความแจ้งเตือนสั้น ๆ
+    $('msg').textContent='โหลดโมเดลจับมือไม่สำเร็จ ตรวจสอบอินเทอร์เน็ต แล้วรีเฟรชหน้านี้';
+    $('go').style.display='none';$('ov').classList.remove('hide');
+    $('ov').style.background='transparent';$('ov').style.justifyContent='flex-end';
   }
 };
 </script>
